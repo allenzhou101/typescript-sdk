@@ -5,15 +5,25 @@ import { AuthInfo } from "../types.js";
 
 export type BearerAuthMiddlewareOptions = {
   /**
-   * A provider used to verify tokens.
-   */
-  provider: OAuthServerProvider;
-
-  /**
    * Optional scopes that the token must have.
+   * @default []
    */
   requiredScopes?: string[];
-};
+} & (
+  | {
+      /**
+       * A provider used to verify tokens and handle OAuth operations
+       */
+      provider: OAuthServerProvider;
+    }
+  | {
+      /**
+       * A function to verify access tokens directly
+       * Must return AuthInfo or throw appropriate OAuth errors
+       */
+      verifyToken: OAuthServerProvider['verifyAccessToken'];
+    }
+);
 
 declare module "express-serve-static-core" {
   interface Request {
@@ -29,7 +39,13 @@ declare module "express-serve-static-core" {
  * 
  * This will validate the token with the auth provider and add the resulting auth info to the request object.
  */
-export function requireBearerAuth({ provider, requiredScopes = [] }: BearerAuthMiddlewareOptions): RequestHandler {
+export function requireBearerAuth(options: BearerAuthMiddlewareOptions): RequestHandler {
+  const verifyToken = 'provider' in options
+    ? (token: string) => options.provider.verifyAccessToken(token)
+    : options.verifyToken;
+
+  const requiredScopes = options.requiredScopes ?? [];
+  
   return async (req, res, next) => {
     try {
       const authHeader = req.headers.authorization;
@@ -42,7 +58,7 @@ export function requireBearerAuth({ provider, requiredScopes = [] }: BearerAuthM
         throw new InvalidTokenError("Invalid Authorization header format, expected 'Bearer TOKEN'");
       }
 
-      const authInfo = await provider.verifyAccessToken(token);
+      const authInfo = await verifyToken(token);
 
       // Check if token has the required scopes (if any)
       if (requiredScopes.length > 0) {
