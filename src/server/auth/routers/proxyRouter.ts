@@ -1,5 +1,7 @@
 import express, { RequestHandler } from "express";
 import { createProxyMiddleware } from "http-proxy-middleware";
+import cors from 'cors';
+import { allowedMethods } from "../middleware/allowedMethods.js";
 
 /**
  * Options for proxying specific OAuth endpoints
@@ -26,6 +28,9 @@ export function mcpAuthProxyRouter({ metadataUrl, endpoints = {} }: ProxyOptions
 
   // Proxy metadata if provided
   if (metadataUrl) {
+    router.use(cors());
+
+    router.use(allowedMethods(['GET']));
     router.use(
       "/.well-known/oauth-authorization-server",
       createProxyMiddleware({
