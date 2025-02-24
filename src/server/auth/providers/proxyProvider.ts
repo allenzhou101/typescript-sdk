@@ -220,20 +220,4 @@ export class ProxyOAuthServerProvider implements OAuthServerProvider {
   async verifyAccessToken(token: string): Promise<AuthInfo> {
     return this._verifyToken(token);
   }  
-
-  get authorizationUrl(): string | undefined {
-    return this._endpoints.authorizationUrl;
-  }
-
-  get tokenUrl(): string | undefined {
-    return this._endpoints.tokenUrl;
-  }
-
-  get revocationUrl(): string | undefined {
-    return this._endpoints.revocationUrl;
-  }
-
-  get registrationUrl(): string | undefined {
-    return this._endpoints.registrationUrl;
-  }
 } 
