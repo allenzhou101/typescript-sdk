@@ -8,7 +8,7 @@ import {
 } from "../../../shared/auth.js";
 import { AuthInfo } from "../types.js";
 import { AuthorizationParams, OAuthServerProvider } from "../provider.js";
-import { InvalidTokenError, ServerError } from "../errors.js";
+import { ServerError } from "../errors.js";
 
 export type ProxyEndpoints = {
   authorizationUrl?: string;
@@ -27,6 +27,11 @@ export type ProxyOptions = {
    * Individual endpoint URLs for proxying specific OAuth operations
    */
   endpoints?: ProxyEndpoints;
+
+   /**
+   * Function to verify access tokens and return auth info
+   */
+   verifyToken: (token: string) => Promise<AuthInfo>;
 };
 
 /**
@@ -36,6 +41,7 @@ export class ProxyOAuthServerProvider implements OAuthServerProvider {
   private readonly _metadataUrl?: string;
   private readonly _endpoints: ProxyEndpoints;
   private _metadata?: OAuthMetadata;
+  private readonly _verifyToken: (token: string) => Promise<AuthInfo>;
 
   constructor(options: ProxyOptions) {
     if (!options.metadataUrl && !options.endpoints) {
@@ -44,6 +50,7 @@ export class ProxyOAuthServerProvider implements OAuthServerProvider {
 
     this._metadataUrl = options.metadataUrl;
     this._endpoints = options.endpoints || {};
+    this._verifyToken = options.verifyToken;
   }
 
   get clientsStore(): OAuthRegisteredClientsStore {
@@ -205,39 +212,7 @@ export class ProxyOAuthServerProvider implements OAuthServerProvider {
   }
 
   async verifyAccessToken(token: string): Promise<AuthInfo> {
-    const metadata = await this.getMetadata();
-    const introspectionUrl = metadata?.introspection_endpoint;
-
-    if (!introspectionUrl) {
-      throw new Error("No introspection endpoint available");
-    }
-
-    const response = await fetch(introspectionUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: new URLSearchParams({
-        token,
-        token_type_hint: "access_token",
-      }),
-    });
-
-    if (!response.ok) {
-      throw new InvalidTokenError("Token validation failed");
-    }
-
-    const introspection = await response.json();
-    if (!introspection.active) {
-      throw new InvalidTokenError("Token is invalid or expired");
-    }
-
-    return {
-      token,
-      clientId: introspection.client_id,
-      scopes: introspection.scope?.split(" ") || [],
-      expiresAt: introspection.exp,
-    };
+    return this._verifyToken(token);
   }
 
   async revokeToken(
