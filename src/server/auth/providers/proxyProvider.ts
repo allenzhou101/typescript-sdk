@@ -27,6 +27,12 @@ export type ProxyOptions = {
    * Function to verify access tokens and return auth info
    */
    verifyToken: (token: string) => Promise<AuthInfo>;
+
+   /**
+   * Function to fetch client information from the upstream server
+   */
+  getClient: (clientId: string) => Promise<OAuthClientInformationFull | undefined>;
+
 };
 
 /**
@@ -35,6 +41,8 @@ export type ProxyOptions = {
 export class ProxyOAuthServerProvider implements OAuthServerProvider {
   private readonly _endpoints: ProxyEndpoints;
   private readonly _verifyToken: (token: string) => Promise<AuthInfo>;
+  private readonly _getClient: (clientId: string) => Promise<OAuthClientInformationFull | undefined>;
+
   public revokeToken?: (
     client: OAuthClientInformationFull, 
     request: OAuthTokenRevocationRequest
@@ -43,7 +51,7 @@ export class ProxyOAuthServerProvider implements OAuthServerProvider {
   constructor(options: ProxyOptions) {
     this._endpoints = options.endpoints;
     this._verifyToken = options.verifyToken;
-
+    this._getClient = options.getClient;
     if (options.endpoints?.revocationUrl) {
       this.revokeToken = async (
         client: OAuthClientInformationFull, 
@@ -79,17 +87,11 @@ export class ProxyOAuthServerProvider implements OAuthServerProvider {
   }
 
   get clientsStore(): OAuthRegisteredClientsStore {
-    const store: OAuthRegisteredClientsStore = {
-      getClient: async () => {
-        // Base implementation returns undefined - can be overridden by subclasses
-        return undefined;
-      },
-    };
-
-    // Only add registerClient if registrationUrl is configured
     const registrationUrl = this._endpoints.registrationUrl;
-    if (registrationUrl) {
-      store.registerClient = async (client: OAuthClientInformationFull) => {
+    return {
+      getClient: this._getClient,
+      ...(registrationUrl && {
+        registerClient: async (client: OAuthClientInformationFull) => {
           const response = await fetch(registrationUrl, {
             method: "POST",
             headers: {
@@ -102,11 +104,10 @@ export class ProxyOAuthServerProvider implements OAuthServerProvider {
             throw new ServerError(`Client registration failed: ${response.status}`);
           }
 
-        return response.json();
-      }
+          return response.json();
+        }
+      })
     }
-
-    return store;
   }
 
   async authorize(
