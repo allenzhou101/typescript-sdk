@@ -60,23 +60,35 @@ export function mcpAuthRouter(options: AuthRouterOptions): RequestHandler {
   const token_endpoint = "/token";
   const registration_endpoint = options.provider.clientsStore.registerClient ? "/register" : undefined;
   const revocation_endpoint = options.provider.revokeToken ? "/revoke" : undefined;
+
+  const getEndpointUrl = (
+    localPath: string | undefined,
+    provider: OAuthServerProvider,
+    getProxyUrl: (p: ProxyOAuthServerProvider) => string | undefined
+  ): string | undefined => {
+    if (!localPath) return undefined;
+    const proxyUrl = isProxyProvider ? getProxyUrl(provider as ProxyOAuthServerProvider) : undefined;
+    return proxyUrl || new URL(localPath, issuer).href;
+  };
+
   const metadata = {
     issuer: issuer.href,
     service_documentation: options.serviceDocumentationUrl?.href,
 
-    authorization_endpoint: (isProxyProvider && provider.authorizationUrl) ? provider.authorizationUrl : new URL(authorization_endpoint, issuer).href,
+    authorization_endpoint: getEndpointUrl(authorization_endpoint, provider, p => p.authorizationUrl) || 
+                          new URL(authorization_endpoint, issuer).href,
     response_types_supported: ["code"],
     code_challenge_methods_supported: ["S256"],
 
-    token_endpoint: (isProxyProvider && provider.tokenUrl) ? provider.tokenUrl : new URL(token_endpoint, issuer).href,
+    token_endpoint: getEndpointUrl(token_endpoint, provider, p => p.tokenUrl) || 
+                   new URL(token_endpoint, issuer).href,
     token_endpoint_auth_methods_supported: ["client_secret_post"],
     grant_types_supported: ["authorization_code", "refresh_token"],
 
-    revocation_endpoint: revocation_endpoint ? new URL(revocation_endpoint, issuer).href : undefined,
+    revocation_endpoint: getEndpointUrl(revocation_endpoint, provider, p => p.revocationUrl),
     revocation_endpoint_auth_methods_supported: revocation_endpoint ? ["client_secret_post"] : undefined,
 
-    registration_endpoint: registration_endpoint ? new URL(registration_endpoint, issuer).href : undefined,
-    test: "hello"
+    registration_endpoint: getEndpointUrl(registration_endpoint, provider, p => p.registrationUrl),
   };
 
   const router = express.Router();
