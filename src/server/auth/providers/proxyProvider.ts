@@ -4,7 +4,7 @@ import {
   OAuthClientInformationFull, 
   OAuthTokenRevocationRequest, 
   OAuthTokens,
-  OAuthMetadata 
+  OAuthTokensSchema,
 } from "../../../shared/auth.js";
 import { AuthInfo } from "../types.js";
 import { AuthorizationParams, OAuthServerProvider } from "../provider.js";
@@ -18,11 +18,6 @@ export type ProxyEndpoints = {
 };
 
 export type ProxyOptions = {
-  /**
-   * string to the upstream OAuth server's metadata endpoint
-   */
-  metadataUrl?: string;
-
   /**
    * Individual endpoint URLs for proxying specific OAuth operations
    */
@@ -38,35 +33,64 @@ export type ProxyOptions = {
  * Implements an OAuth server that proxies requests to another OAuth server.
  */
 export class ProxyOAuthServerProvider implements OAuthServerProvider {
-  private readonly _metadataUrl?: string;
   private readonly _endpoints: ProxyEndpoints;
-  private _metadata?: OAuthMetadata;
   private readonly _verifyToken: (token: string) => Promise<AuthInfo>;
+  public revokeToken?: (
+    client: OAuthClientInformationFull, 
+    request: OAuthTokenRevocationRequest
+  ) => Promise<void>;
 
   constructor(options: ProxyOptions) {
-    if (!options.metadataUrl && !options.endpoints) {
-      throw new Error("Either metadataUrl or at least one endpoint must be provided");
-    }
-
-    this._metadataUrl = options.metadataUrl;
     this._endpoints = options.endpoints || {};
     this._verifyToken = options.verifyToken;
+
+    if (options.endpoints?.revocationUrl) {
+      this.revokeToken = async (
+        client: OAuthClientInformationFull, 
+        request: OAuthTokenRevocationRequest
+      ) => {
+        const revocationUrl = this._endpoints.revocationUrl;
+    
+        if (!revocationUrl) {
+          throw new Error("No revocation endpoint configured");
+        }
+    
+        const params = new URLSearchParams();
+        params.set("token", request.token);
+        params.set("client_id", client.client_id);
+        params.set("client_secret", client.client_secret || "");
+        if (request.token_type_hint) {
+          params.set("token_type_hint", request.token_type_hint);
+        }
+    
+        const response = await fetch(revocationUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+          body: params,
+        });
+    
+        if (!response.ok) {
+          throw new ServerError(`Token revocation failed: ${response.status}`);
+        }
+      }
+    }
   }
 
   get clientsStore(): OAuthRegisteredClientsStore {
-    return {
+    const store: OAuthRegisteredClientsStore = {
       getClient: async () => {
         // Base implementation returns undefined - can be overridden by subclasses
         return undefined;
       },
-      registerClient: async (client: OAuthClientInformationFull) => {
-        // Try upstream registration if available
-        const metadata = await this.getMetadata();
-        const registerUrl = this._endpoints.registrationUrl || 
-                          metadata?.registration_endpoint;
+    };
 
-        if (registerUrl) {
-          const response = await fetch(registerUrl, {
+    // Only add registerClient if registrationUrl is configured
+    const registrationUrl = this._endpoints.registrationUrl;
+    if (registrationUrl) {
+      store.registerClient = async (client: OAuthClientInformationFull) => {
+          const response = await fetch(registrationUrl, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -78,26 +102,11 @@ export class ProxyOAuthServerProvider implements OAuthServerProvider {
             throw new ServerError(`Client registration failed: ${response.status}`);
           }
 
-          return response.json();
-        }
-
-        throw new Error("Client registration not supported");
+        return response.json();
       }
-    };
-  }
-
-  private async getMetadata(): Promise<OAuthMetadata | undefined> {
-    if (!this._metadataUrl) return undefined;
-    
-    if (!this._metadata) {
-      const response = await fetch(this._metadataUrl);
-      if (!response.ok) {
-        throw new ServerError(`Failed to fetch OAuth metadata: ${response.status}`);
-      }
-      this._metadata = await response.json();
     }
-    
-    return this._metadata;
+
+    return store;
   }
 
   async authorize(
@@ -105,9 +114,7 @@ export class ProxyOAuthServerProvider implements OAuthServerProvider {
     params: AuthorizationParams, 
     res: Response
   ): Promise<void> {
-    const metadata = await this.getMetadata();
-    const authorizationUrl = this._endpoints.authorizationUrl || 
-                            metadata?.authorization_endpoint;
+    const authorizationUrl = this._endpoints.authorizationUrl;
 
     if (!authorizationUrl) {
       throw new Error("No authorization endpoint configured");
@@ -144,9 +151,7 @@ export class ProxyOAuthServerProvider implements OAuthServerProvider {
     client: OAuthClientInformationFull, 
     authorizationCode: string
   ): Promise<OAuthTokens> {
-    const metadata = await this.getMetadata();
-    const tokenUrl = this._endpoints.tokenUrl || 
-                    metadata?.token_endpoint;
+    const tokenUrl = this._endpoints.tokenUrl;
 
     if (!tokenUrl) {
       throw new Error("No token endpoint configured");
@@ -169,7 +174,8 @@ export class ProxyOAuthServerProvider implements OAuthServerProvider {
       throw new ServerError(`Token exchange failed: ${response.status}`);
     }
 
-    return response.json();
+    const data = await response.json();
+    return OAuthTokensSchema.parse(data);
   }
 
   async exchangeRefreshToken(
@@ -177,9 +183,7 @@ export class ProxyOAuthServerProvider implements OAuthServerProvider {
     refreshToken: string,
     scopes?: string[]
   ): Promise<OAuthTokens> {
-    const metadata = await this.getMetadata();
-    const tokenUrl = this._endpoints.tokenUrl || 
-                    metadata?.token_endpoint;
+    const tokenUrl = this._endpoints.tokenUrl;
 
     if (!tokenUrl) {
       throw new Error("No token endpoint configured");
@@ -208,49 +212,13 @@ export class ProxyOAuthServerProvider implements OAuthServerProvider {
       throw new ServerError(`Token refresh failed: ${response.status}`);
     }
 
-    return response.json();
+    const data = await response.json();
+    return OAuthTokensSchema.parse(data);
   }
 
   async verifyAccessToken(token: string): Promise<AuthInfo> {
     return this._verifyToken(token);
-  }
-
-  async revokeToken(
-    client: OAuthClientInformationFull, 
-    request: OAuthTokenRevocationRequest
-  ): Promise<void> {
-    const metadata = await this.getMetadata();
-    const revocationUrl = this._endpoints.revocationUrl || 
-                     metadata?.revocation_endpoint;
-
-    if (!revocationUrl) {
-      throw new Error("No revocation endpoint configured");
-    }
-
-    const params = new URLSearchParams();
-    params.set("token", request.token);
-    params.set("client_id", client.client_id);
-    params.set("client_secret", client.client_secret || "");
-    if (request.token_type_hint) {
-      params.set("token_type_hint", request.token_type_hint);
-    }
-
-    const response = await fetch(revocationUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: params,
-    });
-
-    if (!response.ok) {
-      throw new ServerError(`Token revocation failed: ${response.status}`);
-    }
-  }
-
-  get metadataUrl(): string | undefined {
-    return this._metadataUrl;
-  }
+  }  
 
   get authorizationUrl(): string | undefined {
     return this._endpoints.authorizationUrl;
