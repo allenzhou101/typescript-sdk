@@ -21,7 +21,7 @@ export type ProxyOptions = {
   /**
    * Individual endpoint URLs for proxying specific OAuth operations
    */
-  endpoints?: ProxyEndpoints;
+  endpoints: ProxyEndpoints;
 
    /**
    * Function to verify access tokens and return auth info
@@ -41,7 +41,7 @@ export class ProxyOAuthServerProvider implements OAuthServerProvider {
   ) => Promise<void>;
 
   constructor(options: ProxyOptions) {
-    this._endpoints = options.endpoints || {};
+    this._endpoints = options.endpoints;
     this._verifyToken = options.verifyToken;
 
     if (options.endpoints?.revocationUrl) {
