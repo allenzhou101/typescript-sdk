@@ -5,6 +5,7 @@ import { authorizationHandler, AuthorizationHandlerOptions } from "./handlers/au
 import { revocationHandler, RevocationHandlerOptions } from "./handlers/revoke.js";
 import { metadataHandler } from "./handlers/metadata.js";
 import { OAuthServerProvider } from "./provider.js";
+import { ProxyOAuthServerProvider } from "./providers/proxyProvider.js";
 
 export type AuthRouterOptions = {
   /**
@@ -41,6 +42,8 @@ export type AuthRouterOptions = {
  */
 export function mcpAuthRouter(options: AuthRouterOptions): RequestHandler {
   const issuer = options.issuerUrl;
+  const provider = options.provider;
+  const isProxyProvider = provider instanceof ProxyOAuthServerProvider;
 
   // Technically RFC 8414 does not permit a localhost HTTPS exemption, but this will be necessary for ease of testing
   if (issuer.protocol !== "https:" && issuer.hostname !== "localhost" && issuer.hostname !== "127.0.0.1") {
@@ -57,16 +60,15 @@ export function mcpAuthRouter(options: AuthRouterOptions): RequestHandler {
   const token_endpoint = "/token";
   const registration_endpoint = options.provider.clientsStore.registerClient ? "/register" : undefined;
   const revocation_endpoint = options.provider.revokeToken ? "/revoke" : undefined;
-
   const metadata = {
     issuer: issuer.href,
     service_documentation: options.serviceDocumentationUrl?.href,
 
-    authorization_endpoint: new URL(authorization_endpoint, issuer).href,
+    authorization_endpoint: (isProxyProvider && provider.authorizationUrl) ? provider.authorizationUrl : new URL(authorization_endpoint, issuer).href,
     response_types_supported: ["code"],
     code_challenge_methods_supported: ["S256"],
 
-    token_endpoint: new URL(token_endpoint, issuer).href,
+    token_endpoint: (isProxyProvider && provider.tokenUrl) ? provider.tokenUrl : new URL(token_endpoint, issuer).href,
     token_endpoint_auth_methods_supported: ["client_secret_post"],
     grant_types_supported: ["authorization_code", "refresh_token"],
 
@@ -74,25 +76,29 @@ export function mcpAuthRouter(options: AuthRouterOptions): RequestHandler {
     revocation_endpoint_auth_methods_supported: revocation_endpoint ? ["client_secret_post"] : undefined,
 
     registration_endpoint: registration_endpoint ? new URL(registration_endpoint, issuer).href : undefined,
+    test: "hello"
   };
 
   const router = express.Router();
 
   router.use(
-    authorization_endpoint,
+    "/authorize",
     authorizationHandler({ provider: options.provider, ...options.authorizationOptions })
   );
 
   router.use(
-    token_endpoint,
+    "/token",
     tokenHandler({ provider: options.provider, ...options.tokenOptions })
   );
 
-  router.use("/.well-known/oauth-authorization-server", metadataHandler(metadata));
+  router.use(
+    "/.well-known/oauth-authorization-server",
+      metadataHandler(metadata)
+  );
 
   if (registration_endpoint) {
     router.use(
-      registration_endpoint,
+      "/register",
       clientRegistrationHandler({
         clientsStore: options.provider.clientsStore,
         ...options,
@@ -102,7 +108,7 @@ export function mcpAuthRouter(options: AuthRouterOptions): RequestHandler {
 
   if (revocation_endpoint) {
     router.use(
-      revocation_endpoint,
+      "/revoke",
       revocationHandler({ provider: options.provider, ...options.revocationOptions })
     );
   }
