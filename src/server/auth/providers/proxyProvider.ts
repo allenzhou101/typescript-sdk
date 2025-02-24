@@ -13,8 +13,8 @@ import { ServerError } from "../errors.js";
 export type ProxyEndpoints = {
   authorizationUrl?: string;
   tokenUrl?: string;
-  revokeUrl?: string;
-  registerUrl?: string;
+  revocationUrl?: string;
+  registrationUrl?: string;
 };
 
 export type ProxyOptions = {
@@ -62,7 +62,7 @@ export class ProxyOAuthServerProvider implements OAuthServerProvider {
       registerClient: async (client: OAuthClientInformationFull) => {
         // Try upstream registration if available
         const metadata = await this.getMetadata();
-        const registerUrl = this._endpoints.registerUrl || 
+        const registerUrl = this._endpoints.registrationUrl || 
                           metadata?.registration_endpoint;
 
         if (registerUrl) {
@@ -220,10 +220,10 @@ export class ProxyOAuthServerProvider implements OAuthServerProvider {
     request: OAuthTokenRevocationRequest
   ): Promise<void> {
     const metadata = await this.getMetadata();
-    const revokeUrl = this._endpoints.revokeUrl || 
+    const revocationUrl = this._endpoints.revocationUrl || 
                      metadata?.revocation_endpoint;
 
-    if (!revokeUrl) {
+    if (!revocationUrl) {
       throw new Error("No revocation endpoint configured");
     }
 
@@ -235,7 +235,7 @@ export class ProxyOAuthServerProvider implements OAuthServerProvider {
       params.set("token_type_hint", request.token_type_hint);
     }
 
-    const response = await fetch(revokeUrl, {
+    const response = await fetch(revocationUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
@@ -260,11 +260,11 @@ export class ProxyOAuthServerProvider implements OAuthServerProvider {
     return this._endpoints.tokenUrl;
   }
 
-  get revokeUrl(): string | undefined {
-    return this._endpoints.revokeUrl;
+  get revocationUrl(): string | undefined {
+    return this._endpoints.revocationUrl;
   }
 
-  get registerUrl(): string | undefined {
-    return this._endpoints.registerUrl;
+  get registrationUrl(): string | undefined {
+    return this._endpoints.registrationUrl;
   }
 } 
