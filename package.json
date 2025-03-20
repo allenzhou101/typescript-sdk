@@ -32,8 +32,7 @@
     }
   },
   "files": [
-    "dist",
-    "src"
+    "dist"
   ],
   "scripts": {
     "build": "npm run build:esm && npm run build:cjs",
